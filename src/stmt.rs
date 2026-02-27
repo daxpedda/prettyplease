@@ -42,6 +42,7 @@ impl Printer {
             }
             Stmt::Item(item) => self.item(item),
             Stmt::Expr(expr, None) => {
+                self.apply_non_expr_hardbreak();
                 if break_after(expr) {
                     self.ibox(0);
                     self.expr_beginning_of_line(expr, false, true, FixupContext::new_stmt());
@@ -55,6 +56,7 @@ impl Printer {
                 }
             }
             Stmt::Expr(expr, Some(_semi)) => {
+                self.apply_non_expr_hardbreak();
                 if let Expr::Verbatim(tokens) = expr {
                     if tokens.is_empty() {
                         return;
@@ -67,13 +69,21 @@ impl Printer {
                 }
                 self.end();
                 self.hardbreak();
+                self.expr_hardbreak();
             }
             Stmt::Macro(stmt) => {
+                self.apply_any_hardbreaks();
                 self.outer_attrs(&stmt.attrs);
                 let semicolon = stmt.semi_token.is_some()
                     || !is_last && mac::requires_semi(&stmt.mac.delimiter);
                 self.mac(&stmt.mac, None, semicolon);
                 self.hardbreak();
+
+                if semicolon {
+                    self.expr_hardbreak();
+                } else {
+                    self.item_hardbreak();
+                }
             }
         }
     }

@@ -90,6 +90,7 @@ impl Printer {
     }
 
     fn item_fn(&mut self, item: &ItemFn) {
+        self.apply_any_hardbreaks();
         self.outer_attrs(&item.attrs);
         self.cbox(INDENT);
         self.visibility(&item.vis);
@@ -109,9 +110,11 @@ impl Printer {
         self.end();
         self.word("}");
         self.hardbreak();
+        self.item_hardbreak();
     }
 
     fn item_foreign_mod(&mut self, item: &ItemForeignMod) {
+        self.apply_any_hardbreaks();
         self.outer_attrs(&item.attrs);
         self.cbox(INDENT);
         if item.unsafety.is_some() {
@@ -128,9 +131,11 @@ impl Printer {
         self.end();
         self.word("}");
         self.hardbreak();
+        self.item_hardbreak();
     }
 
     fn item_impl(&mut self, item: &ItemImpl) {
+        self.apply_any_hardbreaks();
         self.outer_attrs(&item.attrs);
         self.cbox(INDENT);
         self.ibox(-INDENT);
@@ -166,6 +171,7 @@ impl Printer {
         self.end();
         self.word("}");
         self.hardbreak();
+        self.item_hardbreak();
     }
 
     fn item_macro(&mut self, item: &ItemMacro) {
@@ -219,6 +225,7 @@ impl Printer {
     }
 
     fn item_struct(&mut self, item: &ItemStruct) {
+        self.apply_any_hardbreaks();
         self.outer_attrs(&item.attrs);
         self.cbox(INDENT);
         self.visibility(&item.vis);
@@ -250,6 +257,7 @@ impl Printer {
             }
         }
         self.hardbreak();
+        self.item_hardbreak();
     }
 
     fn item_trait(&mut self, item: &ItemTrait) {
@@ -347,6 +355,7 @@ impl Printer {
     }
 
     fn item_use(&mut self, item: &ItemUse) {
+        self.apply_non_use_hardbreak();
         self.outer_attrs(&item.attrs);
         self.visibility(&item.vis);
         self.word("use ");
@@ -356,6 +365,7 @@ impl Printer {
         self.use_tree(&item.tree);
         self.word(";");
         self.hardbreak();
+        self.use_hardbreak();
     }
 
     #[cfg(not(feature = "verbatim"))]
@@ -1165,9 +1175,11 @@ impl Printer {
         self.word(";");
         self.end();
         self.hardbreak();
+        self.item_hardbreak();
     }
 
     fn impl_item_fn(&mut self, impl_item: &ImplItemFn) {
+        self.apply_any_hardbreaks();
         self.outer_attrs(&impl_item.attrs);
         self.cbox(INDENT);
         self.visibility(&impl_item.vis);
@@ -1190,9 +1202,11 @@ impl Printer {
         self.end();
         self.word("}");
         self.hardbreak();
+        self.item_hardbreak();
     }
 
     fn impl_item_type(&mut self, impl_item: &ImplItemType) {
+        self.apply_any_hardbreaks();
         self.outer_attrs(&impl_item.attrs);
         self.cbox(INDENT);
         self.visibility(&impl_item.vis);
@@ -1210,6 +1224,7 @@ impl Printer {
         self.where_clause_oneline_semi(&impl_item.generics.where_clause);
         self.end();
         self.hardbreak();
+        self.item_hardbreak();
     }
 
     fn impl_item_macro(&mut self, impl_item: &ImplItemMacro) {

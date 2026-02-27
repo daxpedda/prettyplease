@@ -30,6 +30,7 @@ impl Printer {
                     AttrStyle::Inner(_) => true,
                 }
             {
+                self.apply_non_doc_hardbreak();
                 trim_trailing_spaces(&mut doc);
                 self.word(match attr.style {
                     AttrStyle::Outer => "///",
@@ -37,6 +38,7 @@ impl Printer {
                 });
                 self.word(doc);
                 self.hardbreak();
+                self.doc_hardbreak();
                 return;
             } else if can_be_block_comment(&doc)
                 && match attr.style {
@@ -44,6 +46,7 @@ impl Printer {
                     AttrStyle::Inner(_) => true,
                 }
             {
+                self.apply_non_doc_hardbreak();
                 trim_interior_trailing_spaces(&mut doc);
                 self.word(match attr.style {
                     AttrStyle::Outer => "/**",
@@ -52,23 +55,34 @@ impl Printer {
                 self.word(doc);
                 self.word("*/");
                 self.hardbreak();
+                self.doc_hardbreak();
                 return;
             }
         } else if let Some(mut comment) = value_of_attribute("comment", attr) {
             if !comment.contains('\n') {
+                self.apply_non_doc_hardbreak();
                 trim_trailing_spaces(&mut comment);
                 self.word("//");
                 self.word(comment);
                 self.hardbreak();
+                self.doc_hardbreak();
                 return;
             } else if can_be_block_comment(&comment) && !comment.starts_with(&['*', '!'][..]) {
+                self.apply_non_doc_hardbreak();
                 trim_interior_trailing_spaces(&mut comment);
                 self.word("/*");
                 self.word(comment);
                 self.word("*/");
                 self.hardbreak();
+                self.doc_hardbreak();
                 return;
             }
+        }
+
+        if let AttrStyle::Inner(_) = attr.style {
+            self.apply_non_attr_hardbreak();
+        } else {
+            self.apply_non_expr_hardbreak();
         }
 
         self.word(match attr.style {
@@ -79,6 +93,10 @@ impl Printer {
         self.meta(&attr.meta);
         self.word("]");
         self.space();
+
+        if let AttrStyle::Inner(_) = attr.style {
+            self.attr_hardbreak();
+        }
     }
 
     fn meta(&mut self, meta: &Meta) {

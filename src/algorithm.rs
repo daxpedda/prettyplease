@@ -2,11 +2,11 @@
 // See "Algorithm notes" in the crate-level rustdoc.
 
 use crate::ring::RingBuffer;
-use crate::{MARGIN, MIN_SPACE};
+use crate::{INDENT, MARGIN, MIN_SPACE};
 use std::borrow::Cow;
-use std::cmp;
 use std::collections::VecDeque;
 use std::iter;
+use std::{cmp, mem};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Breaks {
@@ -69,6 +69,11 @@ pub struct Printer {
     indent: usize,
     // Buffered indentation to avoid writing trailing whitespace
     pending_indentation: usize,
+    item_hardbreak: bool,
+    attr_hardbreak: bool,
+    doc_hardbreak: bool,
+    use_hardbreak: bool,
+    expr_hardbreak: bool,
 }
 
 #[derive(Clone)]
@@ -89,6 +94,11 @@ impl Printer {
             print_stack: Vec::new(),
             indent: 0,
             pending_indentation: 0,
+            item_hardbreak: false,
+            attr_hardbreak: false,
+            doc_hardbreak: false,
+            use_hardbreak: false,
+            expr_hardbreak: false,
         }
     }
 
@@ -158,6 +168,77 @@ impl Printer {
         });
         self.scan_stack.push_back(right);
         self.right_total += token.blank_space as isize;
+    }
+
+    pub fn item_hardbreak(&mut self) {
+        self.item_hardbreak = true;
+    }
+
+    pub fn attr_hardbreak(&mut self) {
+        self.attr_hardbreak = true;
+    }
+
+    pub fn doc_hardbreak(&mut self) {
+        self.doc_hardbreak = true;
+    }
+
+    pub fn use_hardbreak(&mut self) {
+        self.use_hardbreak = true;
+    }
+
+    pub fn expr_hardbreak(&mut self) {
+        self.expr_hardbreak = true;
+    }
+
+    pub fn apply_any_hardbreaks(&mut self) {
+        if mem::take(&mut self.item_hardbreak)
+            | mem::take(&mut self.attr_hardbreak)
+            | mem::take(&mut self.doc_hardbreak)
+            | mem::take(&mut self.use_hardbreak)
+            | mem::take(&mut self.expr_hardbreak)
+        {
+            self.hardbreak();
+        }
+    }
+
+    pub fn apply_non_attr_hardbreak(&mut self) {
+        if mem::take(&mut self.item_hardbreak)
+            | mem::take(&mut self.doc_hardbreak)
+            | mem::take(&mut self.use_hardbreak)
+            | mem::take(&mut self.expr_hardbreak)
+        {
+            self.hardbreak();
+        }
+    }
+
+    pub fn apply_non_doc_hardbreak(&mut self) {
+        if mem::take(&mut self.item_hardbreak)
+            | mem::take(&mut self.attr_hardbreak)
+            | mem::take(&mut self.use_hardbreak)
+            | mem::take(&mut self.expr_hardbreak)
+        {
+            self.hardbreak();
+        }
+    }
+
+    pub fn apply_non_use_hardbreak(&mut self) {
+        if mem::take(&mut self.item_hardbreak)
+            | mem::take(&mut self.attr_hardbreak)
+            | mem::take(&mut self.doc_hardbreak)
+            | mem::take(&mut self.expr_hardbreak)
+        {
+            self.hardbreak();
+        }
+    }
+
+    pub fn apply_non_expr_hardbreak(&mut self) {
+        if mem::take(&mut self.item_hardbreak)
+            | mem::take(&mut self.attr_hardbreak)
+            | mem::take(&mut self.doc_hardbreak)
+            | mem::take(&mut self.use_hardbreak)
+        {
+            self.hardbreak();
+        }
     }
 
     pub fn scan_string(&mut self, string: Cow<'static, str>) {
@@ -378,9 +459,11 @@ impl Printer {
     }
 
     fn print_indent(&mut self) {
-        self.out.reserve(self.pending_indentation);
-        self.out
-            .extend(iter::repeat(' ').take(self.pending_indentation));
+        let tabs = self.pending_indentation / INDENT as usize;
+        let spaces = self.pending_indentation % INDENT as usize;
+        self.out.reserve(tabs + spaces);
+        self.out.extend(iter::repeat('\t').take(tabs));
+        self.out.extend(iter::repeat(' ').take(spaces));
         self.pending_indentation = 0;
     }
 }

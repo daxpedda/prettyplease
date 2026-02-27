@@ -240,17 +240,21 @@ mod standard_library {
     use crate::path::PathKind;
     use crate::INDENT;
     use syn::ext::IdentExt;
+    use syn::parse::discouraged::Speculative;
     use syn::parse::{Parse, ParseStream, Parser, Result};
     use syn::punctuated::Punctuated;
     use syn::{
-        parenthesized, token, Attribute, Expr, ExprAssign, ExprPath, Ident, Lit, Macro, Pat, Path,
-        Token, Type, Visibility,
+        parenthesized, token, Attribute, Expr, ExprAssign, ExprPath, Ident, Lit, Macro,
+        MacroDelimiter, Pat, Path, Token, Type, Visibility,
     };
 
     enum KnownMacro {
         Expr(Expr),
         Exprs(Vec<Expr>),
         Cfg(Cfg),
+        JbgAsm(Vec<JbgAsmArg>),
+        JbgIo { ty: Type, trait_: Ident },
+        JbgInput(Vec<JbgInput>),
         Matches(Matches),
         ThreadLocal(Vec<ThreadLocal>),
         VecArray(Punctuated<Expr, Token![,]>),
@@ -260,6 +264,24 @@ mod standard_library {
     enum Cfg {
         Eq(Ident, Option<Lit>),
         Call(Ident, Vec<Cfg>),
+    }
+
+    enum JbgAsmArg {
+        Expr(Expr),
+        Operation {
+            operation: Ident,
+            arg: Expr,
+        },
+        NamedOperation {
+            name: Ident,
+            operation: Ident,
+            arg: Expr,
+        },
+    }
+
+    enum JbgInput {
+        Expr(Expr),
+        Ty(Type),
     }
 
     struct Matches {
@@ -425,6 +447,104 @@ mod standard_library {
             Ok(KnownMacro::Exprs(exprs))
         }
 
+        fn parse_jbg_asm(input: ParseStream) -> Result<Self> {
+            let mut args = Vec::new();
+
+            while !input.is_empty() {
+                let named = if input.peek(Ident::peek_any)
+                    && input.peek2(Token![=])
+                    && !input.peek2(Token![==])
+                {
+                    let key = input.call(Ident::parse_any)?;
+                    let eq_token: Token![=] = input.parse()?;
+                    Some((key, eq_token))
+                } else {
+                    None
+                };
+
+                let fork = input.fork();
+
+                let arg = match fork.parse::<Ident>() {
+                    Ok(ident) if ident == "const" || ident == "interpolate" => {
+                        input.advance_to(&fork);
+                        let arg = input.parse()?;
+
+                        if let Some((key, _)) = named {
+                            JbgAsmArg::NamedOperation {
+                                name: key,
+                                operation: ident,
+                                arg,
+                            }
+                        } else {
+                            JbgAsmArg::Operation {
+                                operation: ident,
+                                arg,
+                            }
+                        }
+                    }
+                    _ => {
+                        let value = input.parse()?;
+
+                        if let Some((key, eq_token)) = named {
+                            JbgAsmArg::Expr(Expr::Assign(ExprAssign {
+                                attrs: Vec::new(),
+                                left: Box::new(Expr::Path(ExprPath {
+                                    attrs: Vec::new(),
+                                    qself: None,
+                                    path: Path::from(key),
+                                })),
+                                eq_token,
+                                right: Box::new(value),
+                            }))
+                        } else {
+                            JbgAsmArg::Expr(value)
+                        }
+                    }
+                };
+
+                args.push(arg);
+
+                if input.is_empty() {
+                    break;
+                }
+
+                input.parse::<Token![,]>()?;
+            }
+
+            Ok(KnownMacro::JbgAsm(args))
+        }
+
+        fn parse_jbg_io(input: ParseStream) -> Result<Self> {
+            let ty = input.parse()?;
+            input.parse::<Token![as]>()?;
+            let trait_ = input.parse()?;
+
+            Ok(KnownMacro::JbgIo { ty, trait_ })
+        }
+
+        fn parse_jbg_input(input: ParseStream) -> Result<Self> {
+            let mut args = Vec::new();
+
+            while !input.is_empty() {
+                let fork = input.fork();
+
+                if let Ok(expr) = fork.parse() {
+                    input.advance_to(&fork);
+                    args.push(JbgInput::Expr(expr))
+                } else {
+                    args.push(JbgInput::Ty(input.parse()?))
+                }
+
+                if input.is_empty() {
+                    break;
+                }
+
+                input.parse::<Token![,]>()?;
+            }
+
+            Ok(KnownMacro::JbgInput(args))
+        }
+
         fn parse_matches(input: ParseStream) -> Result<Self> {
             let expression: Expr = input.parse()?;
             input.parse::<Token![,]>()?;
@@ -537,6 +657,10 @@ mod standard_library {
                 | "format_args_nl" | "panic" | "print" | "println" | "todo" | "unimplemented"
                 | "unreachable" => KnownMacro::parse_format_args,
                 "env" => KnownMacro::parse_env,
+                "unsafe_embed_asm" | "import_js" => KnownMacro::parse_jbg_asm,
+                "asm_import" | "js_import" => KnownMacro::parse_jbg_io,
+                "asm_direct" | "asm_imports" | "asm_indirect" | "asm_input" | "asm_output"
+                | "js_output" | "js_parameter" | "js_select" => KnownMacro::parse_jbg_input,
                 "matches" => KnownMacro::parse_matches,
                 "thread_local" => KnownMacro::parse_thread_local,
                 "vec" => KnownMacro::parse_vec,
@@ -570,6 +694,74 @@ mod standard_library {
                     for elem in exprs.iter().delimited() {
                         self.expr(&elem, FixupContext::NONE);
                         self.trailing_comma(elem.is_last);
+                    }
+                    self.offset(-INDENT);
+                    self.end();
+                    self.word(")");
+                }
+                KnownMacro::JbgAsm(exprs) => {
+                    self.nbsp();
+
+                    match mac.delimiter {
+                        MacroDelimiter::Paren(_) => self.word("("),
+                        MacroDelimiter::Brace(_) => self.word("{"),
+                        MacroDelimiter::Bracket(_) => self.word("["),
+                    }
+
+                    self.cbox(INDENT);
+                    self.zerobreak();
+                    for elem in exprs.iter().delimited() {
+                        match *elem {
+                            JbgAsmArg::Expr(expr) => self.expr(expr, FixupContext::NONE),
+                            JbgAsmArg::Operation { operation, arg } => {
+                                self.ident(operation);
+                                self.nbsp();
+                                self.expr(arg, FixupContext::NONE);
+                            }
+                            JbgAsmArg::NamedOperation {
+                                name,
+                                operation,
+                                arg,
+                            } => {
+                                self.ident(name);
+                                self.word(" = ");
+                                self.ident(operation);
+                                self.nbsp();
+                                self.expr(arg, FixupContext::NONE);
+                            }
+                        }
+
+                        self.trailing_comma(elem.is_last);
+                    }
+                    self.offset(-INDENT);
+                    self.end();
+
+                    match mac.delimiter {
+                        MacroDelimiter::Paren(_) => self.word(")"),
+                        MacroDelimiter::Brace(_) => {
+                            self.word("}");
+                            semicolon = false;
+                        }
+                        MacroDelimiter::Bracket(_) => self.word("]"),
+                    }
+                }
+                KnownMacro::JbgIo { ty, trait_ } => {
+                    self.word("(");
+                    self.ty(ty);
+                    self.word(" as ");
+                    self.ident(trait_);
+                    self.word(")");
+                }
+                KnownMacro::JbgInput(input) => {
+                    self.word("(");
+                    self.cbox(INDENT);
+                    self.zerobreak();
+                    for exp_or_ty in input.iter().delimited() {
+                        match *exp_or_ty {
+                            JbgInput::Expr(expr) => self.expr(expr, FixupContext::NONE),
+                            JbgInput::Ty(ty) => self.ty(ty),
+                        }
+                        self.trailing_comma(exp_or_ty.is_last);
                     }
                     self.offset(-INDENT);
                     self.end();
